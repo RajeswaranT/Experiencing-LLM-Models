@@ -1,10 +1,15 @@
-import streamlit as st
+import validators,streamlit as st
 from constants import *
 from langchain_groq import ChatGroq
 from langchain_community.utilities import ArxivAPIWrapper,WikipediaAPIWrapper
 from langchain_community.tools import ArxivQueryRun,WikipediaQueryRun,DuckDuckGoSearchRun
 from langchain.agents import initialize_agent,AgentType
 from langchain.callbacks import StreamlitCallbackHandler
+from langchain.prompts import PromptTemplate
+from langchain_groq import ChatGroq
+from langchain.chains.summarize import load_summarize_chain
+from langchain_community.document_loaders import YoutubeLoader,UnstructuredURLLoader
+
 import os
 from dotenv import load_dotenv
 
@@ -18,7 +23,8 @@ wiki=WikipediaQueryRun(api_wrapper=api_wrapper)
 search=DuckDuckGoSearchRun(name="Search")
 
 def main():
-    supported_llm_models=""
+    
+    supported_llm_model=""
     st.set_page_config(page_title="Experiencing LLM models.", page_icon="🦜")
     ## Sidebar for settings
     with st.sidebar:
@@ -43,6 +49,10 @@ def main():
 
     st.title(f"🔎 Experiencing '{supported_llm_model}' LLM models to Generate the {selected_feature}.") 
     
+    if not api_key.strip():
+        st.error("Please provide the API Key to get started")
+        return
+
     if SUPPOTED_FEATURES.index(selected_feature)==0:
         rag_qa(supported_llm_model,api_key)
     elif SUPPOTED_FEATURES.index(selected_feature)==1:
@@ -52,7 +62,7 @@ def main():
     elif SUPPOTED_FEATURES.index(selected_feature)==3:
         text_summarization()
     elif SUPPOTED_FEATURES.index(selected_feature)==4:
-        youtube_videos_summarizations()
+        youtube_videos_summarizations(supported_llm_model,api_key)
     elif SUPPOTED_FEATURES.index(selected_feature)==5:
         chatbot_with_conversationa_history()
     
@@ -88,11 +98,46 @@ def sql_db_qa():
 def text_summarization():
     st.write("Text Summarization")
 
-def youtube_videos_summarizations():
+def chatbot_with_conversationa_history():
     st.write("Youtube Vides Summarizations")    
 
-def chatbot_with_conversationa_history():
-    st.write("Chatbot with Conversationa history")  
+def youtube_videos_summarizations(supported_llm_model,api_key):
+    st.subheader('Summarize URL')
+    generic_url=st.text_input("URL",label_visibility="collapsed")
+    ## Gemma Model USsing Groq API
+    llm =ChatGroq(model=supported_llm_model, groq_api_key=api_key)
+
+    prompt_template="""
+    Provide a summary of the following content in 300 words:
+    Content:{text}
+
+    """
+    prompt=PromptTemplate(template=prompt_template,input_variables=["text"])
+
+    if st.button("Summarize the Content from YT or Website"):
+        ## Validate all the inputs
+        if not api_key.strip() or not generic_url.strip():
+            st.error("Please provide the information to get started")
+        elif not validators.url(generic_url):
+            st.error("Please enter a valid Url. It can may be a YT video utl or website url")
+        else:
+            try:
+                with st.spinner("Waiting..."):
+                    ## loading the website or yt video data
+                    if "youtube.com" in generic_url:
+                        loader=YoutubeLoader.from_youtube_url(generic_url,add_video_info=True)
+                    else:
+                        loader=UnstructuredURLLoader(urls=[generic_url],ssl_verify=False,
+                                                    headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"})
+                    docs=loader.load()
+
+                    ## Chain For Summarization
+                    chain=load_summarize_chain(llm,chain_type="stuff",prompt=prompt)
+                    output_summary=chain.run(docs)
+
+                    st.success(output_summary)
+            except Exception as e:
+                st.exception(f"Exception:{e}")
 
 
 if __name__ == "__main__":
